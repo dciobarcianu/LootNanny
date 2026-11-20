@@ -1,4 +1,5 @@
 import os
+import queue
 import tempfile
 import time
 import unittest
@@ -77,6 +78,37 @@ class TestChatReader(unittest.TestCase):
             time.sleep(0.01)
         self.fail("Timed out waiting for a parsed chat line")
 
+    def _wait_for_reader(self, reader):
+        self.assertTrue(reader._ready_event.wait(2), reader.last_error)
+
+    def _append(self, path, *lines):
+        with open(path, "a", encoding="utf-8") as chat_log:
+            chat_log.writelines(lines)
+
+    def test_existing_chat_is_not_replayed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "chat.log")
+            with open(path, "w", encoding="utf-8") as chat_log:
+                chat_log.write(
+                    "2021-09-21 09:42:35 [System] [] "
+                    "You inflicted 10.0 points of damage\n"
+                )
+
+            reader = self._make_reader(path)
+            reader.delay_start_reader()
+            try:
+                self._wait_for_reader(reader)
+                with self.assertRaises(queue.Empty):
+                    reader.lines.get(timeout=0.15)
+                self._append(
+                    path, "2021-09-21 09:42:36 [System] [] "
+                    "You inflicted 20.0 points of damage\n"
+                )
+                self.assertEqual(self._wait_for_line(reader).amount, 20.0)
+                self.assertIsNone(reader.getline())
+            finally:
+                reader.stop_reader()
+
     def test_getlines_preserves_rows_after_batch_limit(self):
         reader = self._make_reader("")
         rows = [object() for _ in range(8)]
@@ -97,17 +129,22 @@ class TestChatReader(unittest.TestCase):
     def test_full_queue_backpressures_without_dropping_rows(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "chat.log")
-            with open(path, "w", encoding="utf-8") as chat_log:
-                for damage in ("10.0", "20.0"):
-                    chat_log.write(
-                        "2021-09-21 09:42:35 [System] [] "
-                        f"You inflicted {damage} points of damage\n"
-                    )
+            with open(path, "w", encoding="utf-8"):
+                pass
 
             with patch("chat.MAX_QUEUED_CHAT_ROWS", 1):
                 reader = self._make_reader(path)
                 reader.delay_start_reader()
                 try:
+                    self._wait_for_reader(reader)
+                    self._append(
+                        path,
+                        *(
+                            "2021-09-21 09:42:35 [System] [] "
+                            f"You inflicted {damage} points of damage\n"
+                            for damage in ("10.0", "20.0")
+                        )
+                    )
                     deadline = time.monotonic() + 2
                     while reader.lines.qsize() == 0 and time.monotonic() < deadline:
                         time.sleep(0.01)
@@ -122,19 +159,20 @@ class TestChatReader(unittest.TestCase):
     def test_reader_continues_after_malformed_timestamp(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "chat.log")
-            with open(path, "w", encoding="utf-8") as chat_log:
-                chat_log.write(
-                    "2021-99-99 99:99:99 [System] [] "
-                    "You inflicted 123.4 points of damage\n"
-                )
-                chat_log.write(
-                    "2021-09-21 09:42:35 [System] [] "
-                    "You inflicted 519.1 points of damage\n"
-                )
+            with open(path, "w", encoding="utf-8"):
+                pass
 
             reader = self._make_reader(path)
             try:
                 reader.delay_start_reader()
+                self._wait_for_reader(reader)
+                self._append(
+                    path,
+                    "2021-99-99 99:99:99 [System] [] "
+                    "You inflicted 123.4 points of damage\n",
+                    "2021-09-21 09:42:35 [System] [] "
+                    "You inflicted 519.1 points of damage\n"
+                )
                 line = self._wait_for_line(reader)
                 self.assertIsInstance(line, CombatRow)
                 self.assertEqual(line.amount, 519.1)
@@ -146,19 +184,26 @@ class TestChatReader(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             first_path = os.path.join(directory, "first.log")
             second_path = os.path.join(directory, "second.log")
-            for path, damage in ((first_path, "10.0"), (second_path, "20.0")):
-                with open(path, "w", encoding="utf-8") as chat_log:
-                    chat_log.write(
-                        "2021-09-21 09:42:35 [System] [] "
-                        f"You inflicted {damage} points of damage\n"
-                    )
+            for path in (first_path, second_path):
+                with open(path, "w", encoding="utf-8"):
+                    pass
 
             reader = self._make_reader(first_path)
             try:
                 reader.delay_start_reader()
+                self._wait_for_reader(reader)
+                self._append(
+                    first_path, "2021-09-21 09:42:35 [System] [] "
+                    "You inflicted 10.0 points of damage\n"
+                )
                 self.assertEqual(self._wait_for_line(reader).amount, 10.0)
                 reader.app.config.location.value = second_path
                 reader.delay_start_reader()
+                self._wait_for_reader(reader)
+                self._append(
+                    second_path, "2021-09-21 09:42:35 [System] [] "
+                    "You inflicted 20.0 points of damage\n"
+                )
                 self.assertEqual(self._wait_for_line(reader).amount, 20.0)
                 thread = reader.reader
                 self.assertTrue(reader.stop_reader())
@@ -176,13 +221,18 @@ class TestChatReader(unittest.TestCase):
                 while reader.last_error is None and time.monotonic() < deadline:
                     time.sleep(0.01)
                 self.assertIsNotNone(reader.last_error)
+                reader.reader.join(timeout=2)
+                self.assertFalse(reader.reader.is_alive())
 
-                with open(path, "w", encoding="utf-8") as chat_log:
-                    chat_log.write(
-                        "2021-09-21 09:42:35 [System] [] "
-                        "You inflicted 30.0 points of damage\n"
-                    )
+                with open(path, "w", encoding="utf-8"):
+                    pass
                 reader.delay_start_reader()
+                self._wait_for_reader(reader)
+                self._append(
+                    path,
+                    "2021-09-21 09:42:35 [System] [] "
+                    "You inflicted 30.0 points of damage\n"
+                )
                 self.assertEqual(self._wait_for_line(reader).amount, 30.0)
                 self.assertIsNone(reader.last_error)
                 reader.stop_reader()

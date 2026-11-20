@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Avoid counting old combat log entries as new run costs.
 - Load wrapped and flat JSON game data from the source and packaged asset locations.
 - Report the original startup import error instead of masking it with a `Config` error.
 - Bundle the game data files in the executable build.

@@ -156,6 +156,7 @@ class ChatReader(object):
         self._stop_event = None
         self._reader_path = None
         self._retry_after = 0
+        self._ready_event = threading.Event()
         self.last_error = None
 
     def delay_start_reader(self):
@@ -183,6 +184,7 @@ class ChatReader(object):
 
         stop_event = threading.Event()
         self._stop_event = stop_event
+        self._ready_event.clear()
         self.reader = threading.Thread(
             target=self.readlines,
             args=(path, stop_event),
@@ -213,7 +215,9 @@ class ChatReader(object):
     def readlines(self, path, stop_event):
         try:
             with open(path, "r", encoding="utf_8_sig", errors="replace") as source:
+                source.seek(0, os.SEEK_END)
                 self.last_error = None
+                self._ready_event.set()
                 while not stop_event.is_set():
                     line = source.readline()
                     if not line:
