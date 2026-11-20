@@ -3,17 +3,15 @@ import sys
 import os
 from decimal import Decimal
 from helpers import resource_path
+from data import load_data_file
 
 
 ALL_ATTACHMENTS = {}
 data_filename = resource_path("attachments.json")
 
-if os.path.exists(data_filename):
-    with open(data_filename, 'r') as f:
-        data = json.loads(f.read())
-        for name, attachment_data in data.items():
-            attachment_data["decay"] = Decimal(attachment_data["decay"])
-            ALL_ATTACHMENTS[name] = attachment_data
+for name, attachment_data in load_data_file("attachments.json").items():
+    attachment_data["decay"] = Decimal(attachment_data["decay"])
+    ALL_ATTACHMENTS[name] = attachment_data
 
 FIELDS = ("name", "type", "decay", "ammo")
 

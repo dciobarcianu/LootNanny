@@ -25,6 +25,7 @@ try:
     from views.crafting import CraftingTab
 except Exception as e:
     log_crash(e)
+    raise
 
 MAIN_EVENT_LOOP_TICK = 0.1
 TICK_COUNTER = 0

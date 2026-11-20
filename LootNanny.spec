@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import os
 import sys
-sys.path.append(DISTPATH + "\\..")
+sys.path.insert(0, SPECPATH)
 from version import VERSION
 
 block_cipher = None
@@ -12,14 +12,14 @@ a = Analysis(['LootNanny.py'],
              pathex=[],
              binaries=[],
              datas=[
-                ("attachments.json", "."),
-                ("weapons.json", "."),
-                ("light.qss", "."),
-                ("dark.qss", "."),
-                ("sights.json", "."),
-                ("scopes.json", "."),
-                ("resources.json", "."),
-                ("crafting.json", ".")
+                (os.path.join(SPECPATH, "data", "raw", filename), "data/raw")
+                for filename in (
+                    "attachments.json", "weapons.json", "sights.json",
+                    "scopes.json", "resources.json", "crafting.json"
+                )
+             ] + [
+                (os.path.join(SPECPATH, filename), ".")
+                for filename in ("light.qss", "dark.qss")
              ],
              hiddenimports=[],
              hookspath=[],

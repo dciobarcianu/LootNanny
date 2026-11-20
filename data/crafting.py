@@ -4,6 +4,7 @@ import os
 from decimal import Decimal
 
 from helpers import resource_path
+from data import load_data_file
 from modules.crafting import Slot, Blueprint
 
 ALL_RESOURCES = {}
@@ -11,18 +12,12 @@ ALL_BLUEPRINTS = {}
 bp_filename = resource_path("crafting.json")
 res_filename = resource_path("resources.json")
 
-if os.path.exists(bp_filename):
-    with open(bp_filename, 'r') as f:
-        data = json.loads(f.read())
-        for name, slots in data.items():
-            bp = Blueprint(name, [Slot(*s) for s in slots])
-            ALL_BLUEPRINTS[name] = bp
+for name, slots in load_data_file("crafting.json").items():
+    bp = Blueprint(name, [Slot(*s) for s in slots])
+    ALL_BLUEPRINTS[name] = bp
 
-if os.path.exists(res_filename):
-    with open(res_filename, 'r') as f:
-        data = json.loads(f.read())
-        for name, value in data.items():
-            ALL_RESOURCES[name] = Decimal(value)
+for name, value in load_data_file("resources.json").items():
+    ALL_RESOURCES[name] = Decimal(value)
 
 
 FIELDS = ("name", "material", "amount", "cost", "_", "__", "___")

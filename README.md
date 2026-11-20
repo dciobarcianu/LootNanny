@@ -13,6 +13,8 @@ pyinstaller.exe LootNanny.spec
 ```
 
 This will generate the latest release executable in the dist/ folder.
+The build bundles the JSON files in `data/raw/`; keep that directory alongside
+the source when running from Python.
 
 See [CHANGELOG.md](CHANGELOG.md) for release history.
 

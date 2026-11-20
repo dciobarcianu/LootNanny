@@ -3,6 +3,7 @@ import sys
 import os
 from decimal import Decimal
 from helpers import resource_path
+from data import load_data_file
 
 
 SIGHTS = {}
@@ -10,19 +11,13 @@ SCOPES = {}
 sights_filename = resource_path("sights.json")
 scopes_filename = resource_path("scopes.json")
 
-if os.path.exists(sights_filename):
-    with open(sights_filename, 'r') as f:
-        data = json.loads(f.read())
-        for name, attachment_data in data.items():
-            attachment_data["decay"] = Decimal(attachment_data["decay"])
-            SIGHTS[name] = attachment_data
+for name, attachment_data in load_data_file("sights.json").items():
+    attachment_data["decay"] = Decimal(attachment_data["decay"])
+    SIGHTS[name] = attachment_data
 
-if os.path.exists(scopes_filename):
-    with open(scopes_filename, 'r') as f:
-        data = json.loads(f.read())
-        for name, attachment_data in data.items():
-            attachment_data["decay"] = Decimal(attachment_data["decay"])
-            SCOPES[name] = attachment_data
+for name, attachment_data in load_data_file("scopes.json").items():
+    attachment_data["decay"] = Decimal(attachment_data["decay"])
+    SCOPES[name] = attachment_data
 
 
 FIELDS = ("name", "type", "decay", "ammo")

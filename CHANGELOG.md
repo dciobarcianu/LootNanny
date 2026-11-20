@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Load wrapped and flat JSON game data from the source and packaged asset locations.
+- Report the original startup import error instead of masking it with a `Config` error.
+- Bundle the game data files in the executable build.
+
 ## [0.0.12] - 2026-11-20
 
 ### Fixed
