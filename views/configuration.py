@@ -220,6 +220,8 @@ class ConfigTab(QWidget):
 
     def open_files(self):
         path = QFileDialog.getOpenFileName(self, 'Open a file', '', 'All Files (*.*)')
+        if not path[0]:
+            return
         self.app.config.location = path[0]
         self.chat_location_text.setText(path[0])
         self.onChatLocationChanged()

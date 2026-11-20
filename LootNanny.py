@@ -16,7 +16,7 @@ try:
     from utils.tables import *
     from modules.combat import CombatModule
     from views.configuration import ConfigTab
-    from chat import ChatReader
+    from chat import ChatReader, MAX_QUEUED_CHAT_ROWS
     from config import Config
     from version import VERSION
     from windows.streamer import StreamerWindow
@@ -68,7 +68,7 @@ class LootNanny(QWidget):
         tabs.addTab(self.config_tab, "Config")
         layout.addWidget(tabs)
 
-        statusBar = QStatusBar()
+        self.status_bar = QStatusBar()
 
         self.logging_toggle_btn = QPushButton("Start Run")
         self.logging_toggle_btn.setStyleSheet("background-color: green")
@@ -78,12 +78,12 @@ class LootNanny(QWidget):
         self.logging_pause_btn.setStyleSheet("background-color: grey; color: white;")
         self.logging_pause_btn.released.connect(self.on_pause_logging)
 
-        statusBar.addWidget(QLabel(f"Version: {VERSION}"))
+        self.status_bar.addWidget(QLabel(f"Version: {VERSION}"))
 
-        statusBar.addWidget(self.logging_toggle_btn)
-        statusBar.addWidget(self.logging_pause_btn)
+        self.status_bar.addWidget(self.logging_toggle_btn)
+        self.status_bar.addWidget(self.logging_pause_btn)
 
-        statusBar.addWidget(self.streamer_window_btn)
+        self.status_bar.addWidget(self.streamer_window_btn)
 
         self.theme = "dark"
         self.theme_btn = QPushButton("Toggle Theme")
@@ -93,12 +93,12 @@ class LootNanny(QWidget):
         self.donate_btn = QPushButton("Donate :)")
         self.donate_btn.setStyleSheet("background-color: blue;")
         self.donate_btn.released.connect(self.open_donation_window)
-        statusBar.addWidget(self.donate_btn)
+        self.status_bar.addWidget(self.donate_btn)
 
-        statusBar.addWidget(self.theme_btn)
+        self.status_bar.addWidget(self.theme_btn)
 
         self.combat_module.load_runs()
-        layout.addWidget(statusBar)
+        layout.addWidget(self.status_bar)
 
         self.initialize_from_config()
 
@@ -170,14 +170,14 @@ class LootNanny(QWidget):
                 TICK_COUNTER %= 5
 
             self.chat_reader.delay_start_reader()
+            if self.chat_reader.last_error:
+                self.status_bar.showMessage(
+                    f"Chat reader error: {self.chat_reader.last_error}"
+                )
+            else:
+                self.status_bar.clearMessage()
 
-            # Grab all recent lines in the chat and process them incrementally
-            all_lines_this_tick = []
-            while True:
-                line = self.chat_reader.getline()
-                if not line or len(all_lines_this_tick) > 5:
-                    break
-                all_lines_this_tick.append(line)
+            all_lines_this_tick = self.chat_reader.getlines(100)
 
             self.combat_module.tick(all_lines_this_tick)
 
@@ -446,6 +446,10 @@ class LootNanny(QWidget):
 
     def closeEvent(self, event):
         print("Close Event")
+        self.chat_reader.stop_reader(clear_pending=False)
+        self.combat_module.tick(
+            self.chat_reader.getlines(MAX_QUEUED_CHAT_ROWS)
+        )
         self.combat_module.save_active_run(force=True)
         if self.streamer_window:
             self.streamer_window.close()

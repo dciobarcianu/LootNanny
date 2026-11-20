@@ -1,14 +1,20 @@
-import tailer
 import enum
+import logging
+import os
+import queue
 from datetime import datetime
 from collections import namedtuple
 import re
 import time
-import win_unicode_console
 import threading
 
-from decimal import Decimal
-win_unicode_console.enable()
+from decimal import Decimal, InvalidOperation
+
+
+logger = logging.getLogger(__name__)
+MAX_QUEUED_CHAT_ROWS = 10000
+CHAT_POLL_INTERVAL = 0.05
+READER_RETRY_DELAY = 2
 
 
 class ChatType(str, enum.Enum):
@@ -113,20 +119,20 @@ def parse_log_line(line: str) -> LogLine:
 
 
 REGEXES = {
-    re.compile("Critical hit - Additional damage! You inflicted (\d+\.\d+) points of damage"): (ChatType.DAMAGE, CombatRow, {"critical": True}),
-    re.compile("You inflicted (\d+\.\d+) points of damage"): (ChatType.DAMAGE, CombatRow, {}),
-    re.compile("You healed yourself (\d+\.\d+) points"): (ChatType.HEAL, HealRow, {}),
-    re.compile("Damage deflected!"): (ChatType.DEFLECT, BaseChatRow, {}),
-    re.compile("You Evaded the attack"): (ChatType.EVADE, BaseChatRow, {}),
-    re.compile("You missed"): (ChatType.DODGE, CombatRow, {"miss": True}),
-    re.compile("The target Dodged your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
-    re.compile("The target Evaded your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
-    re.compile("The target Jammed your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
-    re.compile("You took (\d+\.\d+) points of damage"): (ChatType.DAMAGE, BaseChatRow, {}),
-    re.compile("You have gained (\d+\.\d+) experience in your ([a-zA-Z ]+) skill"): (ChatType.SKILL, SkillRow, {}),
-    re.compile("You have gained (\d+\.\d+) ([a-zA-Z ]+)"): (ChatType.SKILL, SkillRow, {}),
-    re.compile("Your ([a-zA-Z ]+) has improved by (\d+\.\d+)"): (ChatType.SKILL, SkillRow, {}),
-    re.compile("Your enhancer ([a-zA-Z0-9 ]+) on your .* broke."): (ChatType.ENHANCER, EnhancerBreakages, {}),
+    re.compile(r"Critical hit - Additional damage! You inflicted (\d+\.\d+) points of damage"): (ChatType.DAMAGE, CombatRow, {"critical": True}),
+    re.compile(r"You inflicted (\d+\.\d+) points of damage"): (ChatType.DAMAGE, CombatRow, {}),
+    re.compile(r"You healed yourself (\d+\.\d+) points"): (ChatType.HEAL, HealRow, {}),
+    re.compile(r"Damage deflected!"): (ChatType.DEFLECT, BaseChatRow, {}),
+    re.compile(r"You Evaded the attack"): (ChatType.EVADE, BaseChatRow, {}),
+    re.compile(r"You missed"): (ChatType.DODGE, CombatRow, {"miss": True}),
+    re.compile(r"The target Dodged your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
+    re.compile(r"The target Evaded your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
+    re.compile(r"The target Jammed your attack"): (ChatType.DODGE, CombatRow, {"miss": True}),
+    re.compile(r"You took (\d+\.\d+) points of damage"): (ChatType.DAMAGE, BaseChatRow, {}),
+    re.compile(r"You have gained (\d+\.\d+) experience in your ([a-zA-Z ]+) skill"): (ChatType.SKILL, SkillRow, {}),
+    re.compile(r"You have gained (\d+\.\d+) ([a-zA-Z ]+)"): (ChatType.SKILL, SkillRow, {}),
+    re.compile(r"Your ([a-zA-Z ]+) has improved by (\d+\.\d+)"): (ChatType.SKILL, SkillRow, {}),
+    re.compile(r"Your enhancer ([a-zA-Z0-9 ]+) on your .* broke."): (ChatType.ENHANCER, EnhancerBreakages, {}),
     re.compile(r"You received (.*) x \((\d+)\) Value: (\d+\.\d+) PED"): (ChatType.LOOT, LootInstance, {})
 }
 
@@ -145,53 +151,136 @@ class ChatReader(object):
 
     def __init__(self, app):
         self.app = app
-        self.lines = []
-
+        self.lines = queue.Queue(maxsize=MAX_QUEUED_CHAT_ROWS)
         self.reader = None
+        self._stop_event = None
+        self._reader_path = None
+        self._retry_after = 0
+        self.last_error = None
 
     def delay_start_reader(self):
-        if self.reader:
+        configured_path = self.app.config.location.value
+        path = (
+            os.path.abspath(os.path.expanduser(configured_path))
+            if configured_path else None
+        )
+
+        if path != self._reader_path:
+            if not self.stop_reader():
+                return
+            self._reader_path = path
+            self._retry_after = 0
+            self.last_error = None
+
+        if not path:
             return
 
-        if not self.app.config.location.value:
+        if self.reader and self.reader.is_alive():
             return
 
-        self.fd = tailer.follow(open(self.app.config.location.value, "r", encoding="utf_8_sig"), delay=0.01)
-        self.reader = threading.Thread(target=self.readlines, daemon=True)
+        if time.monotonic() < self._retry_after:
+            return
+
+        stop_event = threading.Event()
+        self._stop_event = stop_event
+        self.reader = threading.Thread(
+            target=self.readlines,
+            args=(path, stop_event),
+            daemon=True,
+            name="ChatReader"
+        )
         self.reader.start()
 
-    def readlines(self):
+    def stop_reader(self, clear_pending=True):
+        if self._stop_event:
+            self._stop_event.set()
+
+        reader = self.reader
+        if reader and reader is not threading.current_thread():
+            reader.join(timeout=1)
+
+        if reader and reader.is_alive():
+            logger.warning("Chat reader did not stop within one second")
+            return False
+
+        self.reader = None
+        self._stop_event = None
+        self._reader_path = None
+        if clear_pending:
+            self._clear_pending_lines()
+        return True
+
+    def readlines(self, path, stop_event):
         try:
-            for line in self.fd:
-                log_line = parse_log_line(line)
-                if log_line.channel == "System":
-                    matched = False
-                    for rx in REGEXES:
-                        match = rx.search(log_line.msg)
-                        if match:
-                            chat_type, chat_cls, kwargs = REGEXES[rx]
-                            chat_instance: BaseChatRow = chat_cls(*match.groups(), **kwargs)
-                            chat_instance.time = datetime.strptime(log_line.time, "%Y-%m-%d %H:%M:%S")
-                            self.lines.append(chat_instance)
-                            matched = True
-                            break
-                    if not matched:
-                        print([log_line.msg])
-                elif log_line.channel == "Globals":
-                    matched = False
-                    for rx in GLOBAL_REGEXES:
-                        match = rx.search(log_line.msg)
-                        if match:
-                            chat_type, chat_cls, kwargs = GLOBAL_REGEXES[rx]
-                            chat_instance: GlobalInstance = chat_cls(*match.groups(), **kwargs)
-                            chat_instance.time = datetime.strptime(log_line.time, "%Y-%m-%d %H:%M:%S")
-                            self.lines.append(chat_instance)
-                            matched = True
-                            break
-        except UnicodeDecodeError:
-            pass
+            with open(path, "r", encoding="utf_8_sig", errors="replace") as source:
+                self.last_error = None
+                while not stop_event.is_set():
+                    line = source.readline()
+                    if not line:
+                        stop_event.wait(CHAT_POLL_INTERVAL)
+                        continue
+                    self._parse_chat_line(line, stop_event)
+        except OSError as exc:
+            if not stop_event.is_set():
+                self.last_error = str(exc)
+                logger.error("Unable to read chat log %s: %s", path, exc)
+        finally:
+            if not stop_event.is_set():
+                self._retry_after = time.monotonic() + READER_RETRY_DELAY
+
+    def _parse_chat_line(self, line, stop_event):
+        log_line = parse_log_line(line)
+        if log_line.channel == "System":
+            patterns = REGEXES
+        elif log_line.channel == "Globals":
+            patterns = GLOBAL_REGEXES
+        else:
+            return
+
+        for rx, (chat_type, chat_cls, kwargs) in patterns.items():
+            match = rx.search(log_line.msg)
+            if not match:
+                continue
+            try:
+                chat_instance = chat_cls(*match.groups(), **kwargs)
+                chat_instance.time = datetime.strptime(
+                    log_line.time, "%Y-%m-%d %H:%M:%S"
+                )
+            except (InvalidOperation, TypeError, ValueError) as exc:
+                logger.warning("Skipping malformed chat event: %s", exc)
+                return
+
+            self._enqueue(chat_instance, stop_event)
+            return
+
+    def _enqueue(self, chat_instance, stop_event):
+        while not stop_event.is_set():
+            try:
+                self.lines.put(chat_instance, timeout=CHAT_POLL_INTERVAL)
+                return
+            except queue.Full:
+                continue
+
+    def _clear_pending_lines(self):
+        while True:
+            try:
+                self.lines.get_nowait()
+            except queue.Empty:
+                return
+
+    def getlines(self, limit):
+        if limit < 0:
+            raise ValueError("Line limit must be non-negative")
+        lines = []
+        for _ in range(limit):
+            try:
+                lines.append(self.lines.get_nowait())
+            except queue.Empty:
+                break
+        return lines
 
     def getline(self):
-        if len(self.lines):
-            return self.lines.pop(0)
-        return None
+        try:
+            return self.lines.get_nowait()
+        except queue.Empty:
+            return None

@@ -14,6 +14,8 @@ pyinstaller.exe LootNanny.spec
 
 This will generate the latest release executable in the dist/ folder.
 
+See [CHANGELOG.md](CHANGELOG.md) for release history.
+
 ## Additional Notes / known bugs
 
 * If building with a **Virtual Environment**, ensure your `env\Lib\site-packages` directory is on your `PYTHONPATH` environment variable
