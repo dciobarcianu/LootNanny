@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.0.13] - 2026-11-23
 
 ### Added
 
@@ -8,6 +8,7 @@
 
 ### Fixed
 
+- Recognize whole-number PED values in loot messages.
 - Correct the Mayhem MF-Amplifier Alpha name while preserving existing loadouts.
 - Preserve loot messages written to the chat log in multiple pieces.
 - Avoid counting old combat log entries as new run costs.

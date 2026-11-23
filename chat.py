@@ -133,7 +133,7 @@ REGEXES = {
     re.compile(r"You have gained (\d+\.\d+) ([a-zA-Z ]+)"): (ChatType.SKILL, SkillRow, {}),
     re.compile(r"Your ([a-zA-Z ]+) has improved by (\d+\.\d+)"): (ChatType.SKILL, SkillRow, {}),
     re.compile(r"Your enhancer ([a-zA-Z0-9 ]+) on your .* broke."): (ChatType.ENHANCER, EnhancerBreakages, {}),
-    re.compile(r"You received (.*) x \((\d+)\) Value: (\d+\.\d+) PED"): (ChatType.LOOT, LootInstance, {})
+    re.compile(r"You received (.*) x \((\d+)\) Value: (\d+(?:\.\d+)?) PED"): (ChatType.LOOT, LootInstance, {})
 }
 
 GLOBAL_REGEXES = {

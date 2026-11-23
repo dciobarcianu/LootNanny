@@ -87,6 +87,33 @@ class TestChatReader(unittest.TestCase):
         with open(path, "a", encoding="utf-8") as chat_log:
             chat_log.writelines(lines)
 
+    def test_loot_values_accept_whole_and_fractional_ped(self):
+        reader = self._make_reader("")
+        stop_event = threading.Event()
+        for message in (
+            "You received Shrapnel x (15307) Value: 1.53 PED",
+            "You received Animal Pancreas Oil x (6) Value: 3 PED",
+            "You received Animal Oil x (1) Value: 0 PED",
+            "You received Animal Oil x (2) Value: 0.50 PED",
+        ):
+            reader._parse_chat_line(
+                "2021-09-21 09:42:35 [System] [] " + message,
+                stop_event
+            )
+
+        loots = reader.getlines(10)
+        self.assertEqual(len(loots), 4)
+        self.assertTrue(all(isinstance(loot, LootInstance) for loot in loots))
+        self.assertEqual(
+            [(loot.name, loot.amount, loot.value) for loot in loots],
+            [
+                ("Shrapnel", 15307, Decimal("1.5307")),
+                ("Animal Pancreas Oil", 6, Decimal("3")),
+                ("Animal Oil", 1, Decimal("0")),
+                ("Animal Oil", 2, Decimal("0.50"))
+            ]
+        )
+
     def test_existing_chat_is_not_replayed(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "chat.log")
