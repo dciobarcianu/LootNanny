@@ -3,13 +3,20 @@ import sys
 import os
 from decimal import Decimal
 from helpers import resource_path
-from data import load_data_file
+from data import LEGACY_ATTACHMENT_NAMES, load_data_file
 
 
 ALL_ATTACHMENTS = {}
 data_filename = resource_path("attachments.json")
 
-for name, attachment_data in load_data_file("attachments.json").items():
+data = load_data_file("attachments.json")
+for old_name, new_name in LEGACY_ATTACHMENT_NAMES.items():
+    if old_name in data:
+        if new_name not in data:
+            data[new_name] = data[old_name]
+        del data[old_name]
+
+for name, attachment_data in data.items():
     attachment_data["decay"] = Decimal(attachment_data["decay"])
     ALL_ATTACHMENTS[name] = attachment_data
 

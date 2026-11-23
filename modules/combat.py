@@ -10,6 +10,7 @@ import json
 
 from modules.base import BaseModule
 from chat import BaseChatRow, CombatRow, LootInstance, SkillRow, EnhancerBreakages, HealRow, GlobalInstance
+from data import LEGACY_ATTACHMENT_NAMES
 from helpers import dt_to_ts, ts_to_dt, format_filename
 from ocr import screenshot_window
 from modules.markup import MarkupStore
@@ -40,7 +41,7 @@ class Loadout(object):
     def __init__(self, weapon: str = None, amp: str = None, scope: str = None, sight_1: str = None,
                  sight_2: str = None, damage_enh: int = 0, accuracy_enh: int = 0, economy_enh: int = 0):
         self.weapon = weapon
-        self.amp = amp
+        self.amp = LEGACY_ATTACHMENT_NAMES.get(amp, amp)
         self.scope = scope
         self.sight_1 = sight_1
         self.sight_2 = sight_2

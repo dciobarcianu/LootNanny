@@ -2,8 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add Mayhem MF amplifiers, RDI Energy Amplifier Gamma variants, and Omegaton C-120 BGH variants to the loadout data.
+
 ### Fixed
 
+- Correct the Mayhem MF-Amplifier Alpha name while preserving existing loadouts.
 - Preserve loot messages written to the chat log in multiple pieces.
 - Avoid counting old combat log entries as new run costs.
 - Load wrapped and flat JSON game data from the source and packaged asset locations.
