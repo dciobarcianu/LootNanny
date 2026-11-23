@@ -1,12 +1,14 @@
 import os
 import queue
 import tempfile
+import threading
 import time
 import unittest
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from chat import ChatReader, CombatRow, LogLine, parse_log_line
+from chat import ChatReader, CombatRow, LogLine, LootInstance, parse_log_line
 
 
 class TestChatParsing(unittest.TestCase):
@@ -108,6 +110,58 @@ class TestChatReader(unittest.TestCase):
                 self.assertIsNone(reader.getline())
             finally:
                 reader.stop_reader()
+
+    def test_split_loot_lines_are_parsed_once_when_complete(self):
+        cases = (
+            ("You received Shrapnel x (4200) Value: 0.", "42 PED\n"),
+            ("You received Shrapnel x (4200) Value: 0.42 PED", "\n"),
+        )
+        for first, last in cases:
+            with self.subTest(first=first), tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, "chat.log")
+                with open(path, "w", encoding="utf-8"):
+                    pass
+                partial_read = threading.Event()
+                open_file = open
+
+                class ObservedFile:
+                    def __init__(self, *args, **kwargs):
+                        self.file = open_file(*args, **kwargs)
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args):
+                        self.file.close()
+
+                    def seek(self, *args):
+                        return self.file.seek(*args)
+
+                    def readline(self):
+                        line = self.file.readline()
+                        if line and not line.endswith("\n"):
+                            partial_read.set()
+                        return line
+
+                reader = self._make_reader(path)
+                with patch("chat.open", ObservedFile, create=True):
+                    reader.delay_start_reader()
+                    try:
+                        self._wait_for_reader(reader)
+                        self._append(path, "2021-09-21 09:42:35 [System] [] " + first)
+                        self.assertTrue(partial_read.wait(2))
+                        with self.assertRaises(queue.Empty):
+                            reader.lines.get(timeout=0.15)
+                        self._append(path, last)
+                        loot = self._wait_for_line(reader)
+                        self.assertIsInstance(loot, LootInstance)
+                        self.assertEqual(loot.name, "Shrapnel")
+                        self.assertEqual(loot.amount, 4200)
+                        self.assertEqual(loot.value, Decimal("0.42"))
+                        with self.assertRaises(queue.Empty):
+                            reader.lines.get(timeout=0.15)
+                    finally:
+                        reader.stop_reader()
 
     def test_getlines_preserves_rows_after_batch_limit(self):
         reader = self._make_reader("")

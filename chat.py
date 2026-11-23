@@ -218,12 +218,16 @@ class ChatReader(object):
                 source.seek(0, os.SEEK_END)
                 self.last_error = None
                 self._ready_event.set()
+                pending_line = ""
                 while not stop_event.is_set():
                     line = source.readline()
                     if not line:
                         stop_event.wait(CHAT_POLL_INTERVAL)
                         continue
-                    self._parse_chat_line(line, stop_event)
+                    pending_line += line
+                    if pending_line.endswith("\n"):
+                        self._parse_chat_line(pending_line, stop_event)
+                        pending_line = ""
         except OSError as exc:
             if not stop_event.is_set():
                 self.last_error = str(exc)
